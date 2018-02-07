@@ -19,6 +19,7 @@ package resource
 import (
 	"net/http"
 
+	"github.com/nuclio/nuclio/pkg/processor/trigger"
 	"github.com/nuclio/nuclio/pkg/processor/webadmin"
 	"github.com/nuclio/nuclio/pkg/restful"
 
@@ -48,17 +49,20 @@ func (tr *triggersResource) GetAll(request *http.Request) map[string]restful.Att
 }
 
 func (tr *triggersResource) GetByID(request *http.Request, id string) restful.Attributes {
-	for _, trigger := range tr.getProcessor().GetTriggers() {
+	if trigger := tr.getTriggerByID(id); trigger != nil {
+
 		configuration := trigger.GetConfig()
 
-		// extract the ID from the configuration (get and remove)
-		triggerID := tr.extractIDFromConfiguration(configuration)
+		// extract the ID from the configuration (just to remove it)
+		tr.extractIDFromConfiguration(configuration)
 
-		if id == triggerID {
-			return configuration
-		}
+		return configuration
 	}
 
+	return nil
+}
+
+func (tr *triggersResource) Remove(request *http.Request, id string) error {
 	return nil
 }
 
@@ -80,6 +84,16 @@ func (tr *triggersResource) getStatistics(request *http.Request) (string, map[st
 	return "statistics", map[string]restful.Attributes{
 		resourceID: {"stats": "example"},
 	}, true, http.StatusOK, nil
+}
+
+func (tr *triggersResource) getTriggerByID(id string) trigger.Trigger {
+	for _, trigger := range tr.getProcessor().GetTriggers() {
+		if id == trigger.GetID() {
+			return trigger
+		}
+	}
+
+	return nil
 }
 
 func (tr *triggersResource) extractIDFromConfiguration(configuration map[string]interface{}) string {
