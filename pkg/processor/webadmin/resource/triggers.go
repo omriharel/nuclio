@@ -19,6 +19,7 @@ package resource
 import (
 	"net/http"
 
+	"github.com/nuclio/nuclio/pkg/errors"
 	"github.com/nuclio/nuclio/pkg/processor/trigger"
 	"github.com/nuclio/nuclio/pkg/processor/webadmin"
 	"github.com/nuclio/nuclio/pkg/restful"
@@ -63,6 +64,12 @@ func (tr *triggersResource) GetByID(request *http.Request, id string) restful.At
 }
 
 func (tr *triggersResource) Remove(request *http.Request, id string) error {
+	if err := tr.getProcessor().RemoveTrigger(id); err != nil {
+		tr.Logger.DebugWith("Failed to remove trigger", "id", id, "err", err)
+
+		return errors.Wrap(err, "Failed to remove trigger")
+	}
+
 	return nil
 }
 
@@ -109,6 +116,7 @@ var triggers = &triggersResource{
 	resource: newResource("triggers", []restful.ResourceMethod{
 		restful.ResourceMethodGetList,
 		restful.ResourceMethodGetDetail,
+		restful.ResourceMethodDelete,
 	}),
 }
 
