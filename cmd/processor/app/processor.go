@@ -18,6 +18,7 @@ package app
 
 import (
 	"os"
+	"sync"
 
 	"github.com/nuclio/nuclio/pkg/errors"
 	"github.com/nuclio/nuclio/pkg/functionconfig"
@@ -51,6 +52,7 @@ import (
 
 	"github.com/nuclio/logger"
 	"github.com/nuclio/zap"
+	"testing/quick"
 )
 
 // Processor is responsible to process events
@@ -61,6 +63,7 @@ type Processor struct {
 	webAdminServer    *webadmin.Server
 	healthCheckServer *healthcheck.Server
 	metricsPushers    []*statistics.MetricPusher
+	triggersLock      *sync.Mutex
 }
 
 // NewProcessor returns a new Processor
@@ -102,6 +105,9 @@ func NewProcessor(configurationPath string, platformConfigurationPath string) (*
 	}
 
 	// create triggers
+	newProcessor.triggersLock.Lock()
+	defer newProcessor.triggersLock.Unlock()
+
 	newProcessor.triggers, err = newProcessor.createTriggers(processorConfiguration)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to create triggers")
@@ -126,6 +132,9 @@ func NewProcessor(configurationPath string, platformConfigurationPath string) (*
 func (p *Processor) Start() error {
 
 	// iterate over all triggers and start them
+	p.triggersLock.Lock()
+	defer p.triggersLock.Unlock()
+
 	for _, trigger := range p.triggers {
 		trigger.Start(nil)
 	}
@@ -150,12 +159,43 @@ func (p *Processor) Start() error {
 
 // get triggers
 func (p *Processor) GetTriggers() []trigger.Trigger {
+	p.triggersLock.Lock()
+	defer p.triggersLock.Unlock()
+
 	return p.triggers
+}
+
+func (p *Processor) RemoveTrigger(id string) error {
+	p.logger.DebugWith("Looking for trigger to remove", "id", id)
+
+	p.triggersLock.Lock()
+	defer p.triggersLock.Unlock()
+
+	for _, trigger := range p.triggers {
+		if id == trigger.GetID() {
+			p.logger.DebugWith("Found trigger, removing")
+
+			checkpoint, err := trigger.Stop(false)
+			if err != nil {
+				return errors.Wrap(err, "Failed to stop trigger")
+			}
+
+			p.logger.DebugWith("Trigger removed", "checkpoint", checkpoint)
+
+			return nil
+		}
+	}
+
+	p.logger.Debug("Trigger not found")
+	return errors.New("Trigger not found")
 }
 
 // get workers
 func (p *Processor) GetWorkers() []*worker.Worker {
 	var workers []*worker.Worker
+
+	p.triggersLock.Lock()
+	defer p.triggersLock.Unlock()
 
 	// iterate over the processor's triggers
 	for _, trigger := range p.triggers {
