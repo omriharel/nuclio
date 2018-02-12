@@ -136,11 +136,10 @@ func (fp *fixedPool) GetWorkers() []*Worker {
 //
 
 type unboundPool struct {
-	logger                logger.Logger
-	workers               []*Worker
-	workersLock           *sync.Mutex
-	workerCreationFunc    workerCreator
-	nextUnusedWorkerIndex int
+	logger             logger.Logger
+	workers            []*Worker
+	workersLock        *sync.Mutex
+	workerCreationFunc workerCreator
 }
 
 type workerCreator func(index int) (*Worker, error)
@@ -149,6 +148,7 @@ func NewUnboundPoolWorkerAllocator(parentLogger logger.Logger, workerCreationFun
 	newUnboundPool := unboundPool{
 		logger:             parentLogger.GetChild("unbound_pool_allocator"),
 		workerCreationFunc: workerCreationFunc,
+		workersLock:        &sync.Mutex{},
 	}
 
 	return &newUnboundPool, nil
@@ -158,32 +158,29 @@ func (up *unboundPool) Allocate(timeout time.Duration) (*Worker, error) {
 	up.workersLock.Lock()
 	defer up.workersLock.Unlock()
 
-	newWorker, err := up.workerCreationFunc(up.nextUnusedWorkerIndex)
+	// first determine the next unused worker index
+	// assume we have no unused workers
+	nextUnusedWorkerIndex := len(up.workers)
+
+	// if we found an unused index, use it instead
+	for index, worker := range up.workers {
+		if worker == nil {
+			nextUnusedWorkerIndex = index
+			break
+		}
+	}
+
+	newWorker, err := up.workerCreationFunc(nextUnusedWorkerIndex)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to create worker")
 	}
 
-	// if our worker slice doesn't yet have the index we're using, extend it
-	if len(up.workers) == up.nextUnusedWorkerIndex {
+	// if our worker slice doesn't yet have the index we're using, extend it.
+	// otherwise, put the worker into the slice at the appropriate index
+	if len(up.workers) == nextUnusedWorkerIndex {
 		up.workers = append(up.workers, newWorker)
-		up.nextUnusedWorkerIndex++
 	} else {
-
-		// otherwise, put the worker into the slice and find the next unused index
-		up.workers[up.nextUnusedWorkerIndex] = newWorker
-
-		for index, worker := range up.workers {
-
-			// if there was an unused index, set it and return the worker
-			if worker == nil {
-				up.nextUnusedWorkerIndex = index
-
-				return newWorker, nil
-			}
-		}
-
-		// if we got here, all indexes are used and thus the next allocation will extend the slice
-		up.nextUnusedWorkerIndex = len(up.workers)
+		up.workers[nextUnusedWorkerIndex] = newWorker
 	}
 
 	return newWorker, nil
@@ -196,7 +193,7 @@ func (up *unboundPool) Release(worker *Worker) {
 	for index, iteratedWorker := range up.workers {
 		if worker == iteratedWorker {
 
-			// only remove the worker - Allocate will find that the index is unused some time later
+			// remove the worker - Allocate() will reuse its index next time it's called
 			up.workers[index] = nil
 
 			return

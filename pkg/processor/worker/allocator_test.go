@@ -75,7 +75,7 @@ func (suite *AllocatorTestSuite) TestFixedPoolAllocator() {
 	secondAllocatedWorker, err := fpa.Allocate(time.Hour)
 	suite.Require().NoError(err)
 	suite.Require().Contains(workers, secondAllocatedWorker)
-	suite.NotEqual(firstAllocatedWorker, secondAllocatedWorker)
+	suite.Require().NotEqual(firstAllocatedWorker, secondAllocatedWorker)
 
 	// allocate yet again - should time out
 	failedAllocationWorker, err := fpa.Allocate(50 * time.Millisecond)
@@ -91,6 +91,57 @@ func (suite *AllocatorTestSuite) TestFixedPoolAllocator() {
 	suite.Require().Equal(worker2, thirdAllocatedWorker)
 
 	suite.Require().True(fpa.Shareable())
+}
+
+func (suite *AllocatorTestSuite) TestUnboundPoolAllocator() {
+	workerCreationFunc := func(index int) (*Worker, error) {
+		return &Worker{
+			index: index,
+		}, nil
+	}
+
+	upa, err := NewUnboundPoolWorkerAllocator(suite.logger, workerCreationFunc)
+	suite.Require().NoError(err)
+	suite.Require().NotNil(upa)
+
+	// allocate once - should allocate
+	firstAllocatedWorker, err := upa.Allocate(time.Hour)
+	suite.Require().NoError(err)
+	suite.Require().Contains(upa.GetWorkers(), firstAllocatedWorker)
+	suite.Require().Equal(firstAllocatedWorker.index, 0)
+
+	// allocate again - should allocate other worker
+	secondAllocatedWorker, err := upa.Allocate(time.Hour)
+	suite.Require().NoError(err)
+	suite.Require().Contains(upa.GetWorkers(), secondAllocatedWorker)
+	suite.Require().NotEqual(firstAllocatedWorker, secondAllocatedWorker)
+	suite.Require().Equal(secondAllocatedWorker.index, 1)
+
+	// release the second worker
+	suite.Require().NotPanics(func() { upa.Release(secondAllocatedWorker) })
+	suite.Require().NotContains(upa.GetWorkers(), secondAllocatedWorker)
+	suite.Require().Len(upa.GetWorkers(), 1)
+
+	// allocate again - should allocate second worker
+	thirdAllocatedWorker, err := upa.Allocate(time.Hour)
+	suite.Require().NoError(err)
+	suite.Require().Contains(upa.GetWorkers(), thirdAllocatedWorker)
+
+	// the third allocated worker should have index 1 because we freed it by releasing the second allocated worker
+	suite.Require().Equal(thirdAllocatedWorker.index, 1)
+
+	// release the first worker
+	suite.Require().NotPanics(func() { upa.Release(firstAllocatedWorker) })
+	suite.Require().NotContains(upa.GetWorkers(), firstAllocatedWorker)
+	suite.Require().Len(upa.GetWorkers(), 1)
+
+	// allocate a fourth worker - should have index 0
+	fourthAllocatedWorker, err := upa.Allocate(time.Hour)
+	suite.Require().NoError(err)
+	suite.Require().Contains(upa.GetWorkers(), fourthAllocatedWorker)
+	suite.Require().Equal(fourthAllocatedWorker.index, 0)
+
+	suite.Require().True(upa.Shareable())
 }
 
 func TestAllocatorTestSuite(t *testing.T) {
