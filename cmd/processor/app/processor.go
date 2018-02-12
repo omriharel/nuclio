@@ -52,7 +52,6 @@ import (
 
 	"github.com/nuclio/logger"
 	"github.com/nuclio/zap"
-	"testing/quick"
 )
 
 // Processor is responsible to process events
