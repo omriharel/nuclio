@@ -17,8 +17,10 @@ limitations under the License.
 package worker
 
 import (
-	"errors"
+	"sync"
 	"time"
+
+	"github.com/nuclio/nuclio/pkg/errors"
 
 	"github.com/nuclio/logger"
 )
@@ -54,7 +56,7 @@ type singleton struct {
 func NewSingletonWorkerAllocator(parentLogger logger.Logger, worker *Worker) (Allocator, error) {
 
 	return &singleton{
-		logger: parentLogger.GetChild("singelton_allocator"),
+		logger: parentLogger.GetChild("singleton_allocator"),
 		worker: worker,
 	}, nil
 }
@@ -78,7 +80,7 @@ func (s *singleton) GetWorkers() []*Worker {
 
 //
 // Fixed pool of workers
-// Holds a fixed number of workers. When a worker is unavailable, caller is blocked
+// Holds a fixed number of workers.
 //
 
 type fixedPool struct {
@@ -124,4 +126,103 @@ func (fp *fixedPool) Shareable() bool {
 // get direct access to all workers for things like management / housekeeping
 func (fp *fixedPool) GetWorkers() []*Worker {
 	return fp.workers
+}
+
+//
+// Unbound pool of workers
+// Allocates and releases workers on demand. A new worker is created each time Allocate is called.
+// When Release is called, the worker's reference gets deleted and it will be GC'd later.
+// Access to workers must be synchronized since this pool can be shared by goroutines.
+//
+
+type unboundPool struct {
+	logger                logger.Logger
+	workers               []*Worker
+	workersLock           *sync.Mutex
+	workerCreationFunc    workerCreator
+	nextUnusedWorkerIndex int
+}
+
+type workerCreator func(index int) (*Worker, error)
+
+func NewUnboundPoolWorkerAllocator(parentLogger logger.Logger, workerCreationFunc workerCreator) (Allocator, error) {
+	newUnboundPool := unboundPool{
+		logger:             parentLogger.GetChild("unbound_pool_allocator"),
+		workerCreationFunc: workerCreationFunc,
+	}
+
+	return &newUnboundPool, nil
+}
+
+func (up *unboundPool) Allocate(timeout time.Duration) (*Worker, error) {
+	up.workersLock.Lock()
+	defer up.workersLock.Unlock()
+
+	newWorker, err := up.workerCreationFunc(up.nextUnusedWorkerIndex)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to create worker")
+	}
+
+	// if our worker slice doesn't yet have the index we're using, extend it
+	if len(up.workers) == up.nextUnusedWorkerIndex {
+		up.workers = append(up.workers, newWorker)
+		up.nextUnusedWorkerIndex++
+	} else {
+
+		// otherwise, put the worker into the slice and find the next unused index
+		up.workers[up.nextUnusedWorkerIndex] = newWorker
+
+		for index, worker := range up.workers {
+
+			// if there was an unused index, set it and return the worker
+			if worker == nil {
+				up.nextUnusedWorkerIndex = index
+
+				return newWorker, nil
+			}
+		}
+
+		// if we got here, all indexes are used and thus the next allocation will extend the slice
+		up.nextUnusedWorkerIndex = len(up.workers)
+	}
+
+	return newWorker, nil
+}
+
+func (up *unboundPool) Release(worker *Worker) {
+	up.workersLock.Lock()
+	defer up.workersLock.Unlock()
+
+	for index, iteratedWorker := range up.workers {
+		if worker == iteratedWorker {
+
+			// only remove the worker - Allocate will find that the index is unused some time later
+			up.workers[index] = nil
+
+			return
+		}
+	}
+}
+
+// true if the several go routines can share this allocator
+func (up *unboundPool) Shareable() bool {
+	return true
+}
+
+// get direct access to all workers for things like management / housekeeping
+func (up *unboundPool) GetWorkers() []*Worker {
+
+	up.workersLock.Lock()
+	defer up.workersLock.Unlock()
+
+	var result []*Worker
+
+	// we'll want to only return non-nil workers (as we may have unused indices)
+	for _, worker := range up.workers {
+		if worker != nil {
+			result = append(result, worker)
+		}
+	}
+
+	return result
 }

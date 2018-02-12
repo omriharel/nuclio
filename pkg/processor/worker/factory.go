@@ -70,6 +70,28 @@ func (waf *Factory) CreateSingletonPoolWorkerAllocator(logger logger.Logger,
 	return workerAllocator, nil
 }
 
+func (waf *Factory) CreateUnboundPoolWorkerAllocator(logger logger.Logger,
+	runtimeConfiguration *runtime.Configuration) (Allocator, error) {
+
+	// create a function that creates workers
+	workerCreationFunc := func(index int) (*Worker, error) {
+		worker, err := waf.createWorker(logger, index, runtimeConfiguration)
+		if err != nil {
+			return nil, errors.Wrap(err, "Failed to create worker")
+		}
+
+		return worker, nil
+	}
+
+	// create an allocator
+	workerAllocator, err := NewUnboundPoolWorkerAllocator(logger, workerCreationFunc)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to create worker allocator")
+	}
+
+	return workerAllocator, nil
+}
+
 func (waf *Factory) createWorker(parentLogger logger.Logger,
 	workerIndex int,
 	runtimeConfiguration *runtime.Configuration) (*Worker, error) {
