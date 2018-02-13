@@ -42,7 +42,8 @@ func (f *factory) Create(parentLogger logger.Logger,
 	}
 
 	// create worker allocator
-	workerAllocator, err := worker.WorkerFactorySingleton.CreateUnboundPoolWorkerAllocator(httpLogger,
+	workerAllocator, err := worker.WorkerFactorySingleton.CreateFixedPoolWorkerAllocator(httpLogger,
+		configuration.MaxWorkers,
 		runtimeConfiguration)
 
 	if err != nil {

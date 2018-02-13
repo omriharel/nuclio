@@ -58,15 +58,7 @@ func newTrigger(parentLogger logger.Logger,
 }
 
 func (rmq *rabbitMq) Start(checkpoint trigger.Checkpoint) error {
-	var err error
-
 	rmq.Logger.InfoWith("Starting", "brokerUrl", rmq.configuration.URL)
-
-	// get a worker, we'll be using this one always
-	rmq.worker, err = rmq.WorkerAllocator.Allocate(10 * time.Second)
-	if err != nil {
-		return errors.Wrap(err, "Failed to allocate worker")
-	}
 
 	if err := rmq.createBrokerResources(); err != nil {
 		return errors.Wrap(err, "Failed to create broker resources")

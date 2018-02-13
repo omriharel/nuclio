@@ -42,7 +42,7 @@ func (f *factory) Create(parentLogger logger.Logger,
 	}
 
 	// create worker allocator
-	workerAllocator, err := worker.WorkerFactorySingleton.CreateSingletonPoolWorkerAllocator(rabbitMqLogger,
+	workerAllocator, err := worker.WorkerFactorySingleton.CreateUnboundPoolWorkerAllocator(rabbitMqLogger,
 		runtimeConfiguration)
 
 	if err != nil {

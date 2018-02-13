@@ -71,6 +71,8 @@ func NewProcessor(configurationPath string, platformConfigurationPath string) (*
 
 	newProcessor := &Processor{}
 
+	newProcessor.triggersLock = &sync.Mutex{}
+
 	// read platform configuration
 	platformConfiguration, platformConfigurationFileRead, err := newProcessor.readPlatformConfiguration(platformConfigurationPath)
 	if err != nil {
@@ -132,11 +134,12 @@ func (p *Processor) Start() error {
 
 	// iterate over all triggers and start them
 	p.triggersLock.Lock()
-	defer p.triggersLock.Unlock()
 
 	for _, trigger := range p.triggers {
 		trigger.Start(nil)
 	}
+
+	p.triggersLock.Unlock()
 
 	// start the web interface
 	err := p.webAdminServer.Start()
